@@ -32,7 +32,7 @@ __version__ = "$Revision$"
 
 
 # path to smartctl
-_smartctlPath = "/usr/local/sbin/smartctl"
+_smartctlPath = "/usr/sbin/smartctl"
 
 # application wide verbosity (can be adjusted with -v [0-3])
 _verbosity = 0
