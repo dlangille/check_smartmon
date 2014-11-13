@@ -124,14 +124,14 @@ def callSmartMonTools(path, device):
     if len(line):
         return 3, "UNKNOWN: call exits unexpectedly (%s)" % line, "", ""
 
-    temperatureOutput = ""
+    smartAttributeOutput = ""
     for line in child_stdout:
-        temperatureOutput += line
+        smartAttributeOutput += line
 
-    return 0 ,"", healthStatusOutput, temperatureOutput
+    return 0 ,"", healthStatusOutput, smartAttributeOutput
 
 
-def parseOutput(healthMessage, temperatureMessage):
+def parseOutput(healthMessage, smartAttributeOutput):
     """
     Parse smartctl output
     Returns (health status, temperature).
@@ -155,21 +155,24 @@ def parseOutput(healthMessage, temperatureMessage):
 
     # parse temperature attribute line
     temperature = 0
-    lines = temperatureMessage.split("\n")
+    reallocatedSectors = 0
+    lines = smartAttributeOutput.split("\n")
     for line in lines:
         parts = line.split()
         if len(parts):
             # 194 is the temperature value id
             if parts[0] == "194":
                 temperature = int(parts[9])
-                break
+            # 5 is reallocated sectors
+            elif parts[0] == "5":
+                reallocatedSectors = int(parts[9])
     vprint(3, "Temperature: %d" %temperature)
+    vprint(3, "ReallocatedSectors: %d" %reallocatedSectors)
 
-    return (healthStatus, temperature)
+    return (healthStatus, temperature, reallocatedSectors)
 
 
-def createReturnInfo(healthStatus, temperature, warningThreshold,
-                     criticalThreshold):
+def createReturnInfo(healthStatus, temperature, reallocatedSectors, warningThreshold, criticalThreshold):
     """
     Create return information according to given thresholds.
     """
@@ -178,12 +181,15 @@ def createReturnInfo(healthStatus, temperature, warningThreshold,
     if healthStatus != "PASSED":
         return 2, "CRITICAL: device does not pass health status"
 
+    if (reallocatedSectors > 0):
+        return 2, "CRITICAL: number of bad sectors (%d) exceeds warning threshold (%s)" % (reallocatedSectors, 0)
+
     if temperature > criticalThreshold:
         return 2, "CRITICAL: device temperature (%d) exceeds critical temperature threshold (%s)" % (temperature, criticalThreshold)
     elif temperature > warningThreshold:
         return 1, "WARNING: device temperature (%d) exceeds warning temperature threshold (%s)" % (temperature, warningThreshold)
     else:
-        return 0, "OK: device is functional and stable (temperature: %d)" % temperature
+        return 0, "OK: device is functional and stable (temperature: %d, reallocatedSectors: %d)" % (temperature, reallocatedSectors)
 
 
 def exitWithMessage(value, message):
@@ -231,13 +237,13 @@ if __name__ == "__main__":
 
     # call smartctl and parse output
     vprint(2, "Call smartctl")
-    (value, message, healthStatusOutput, temperatureOutput) = callSmartMonTools(_smartctlPath, device)
+    (value, message, healthStatusOutput, smartAttributeOutput) = callSmartMonTools(_smartctlPath, device)
     if value != 0:
         exitWithMessage(value, message)
     vprint(2, "Parse smartctl output")
-    (healthStatus, temperature) = parseOutput(healthStatusOutput, temperatureOutput)
+    (healthStatus, temperature, reallocatedSectors) = parseOutput(healthStatusOutput, smartAttributeOutput)
     vprint(2, "Generate return information")
-    (value, message) = createReturnInfo(healthStatus, temperature, options.warningThreshold, options.criticalThreshold)
+    (value, message) = createReturnInfo(healthStatus, temperature, reallocatedSectors, options.warningThreshold, options.criticalThreshold)
 
     # exit program
     exitWithMessage(value, message)
