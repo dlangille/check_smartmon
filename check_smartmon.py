@@ -1,4 +1,4 @@
-#!/usr/local/bin/python2.7
+#!/usr/local/bin/python
 
 # -*- coding: iso8859-1 -*-
 #
@@ -52,7 +52,8 @@ def parseCmdLine(args):
         version = "%%prog %s" % (__version__)
 
         parser = OptionParser(usage=usage, version=version)
-	parser.add_option("-d", "--device", action="store", dest="device", default="", metavar="DEVICE", help="device to check")
+	parser.add_option("-d", "--device", action="store", dest="device", default="", metavar="DEVICE",
+			help="device to check")
         parser.add_option("-v", "--verbosity", action="store",
                         dest="verbosity", type="int", default=0,
                         metavar="LEVEL", help="set verbosity level to LEVEL; defaults to 0 (quiet), \
@@ -161,8 +162,9 @@ def parseOutput(healthMessage, temperatureMessage, devType):
                 getNext = 0
                 for line in lines:
                         if getNext:
-                                statusLine = line
-                                break
+                                if line <> "SMART STATUS RETURN: incomplete response, ATA output registers missing":
+                                        statusLine = line
+                                        break
                         elif line == "=== START OF READ SMART DATA SECTION ===":
                                 getNext = 1
                         # fi
@@ -218,21 +220,24 @@ def parseOutput(healthMessage, temperatureMessage, devType):
         return (healthStatus, temperature)
 # end
 
-def createReturnInfo(healthStatus, temperature, warningThreshold,
+def createReturnInfo(device, healthStatus, temperature, warningThreshold,
                 criticalThreshold):
         """Create return information according to given thresholds."""
 
         # this is absolutely critical!
         if healthStatus not in [ "PASSED", "OK" ]:
-                return (2, "CRITICAL: device does not pass health status")
+                return (2, "CRITICAL: device (%s) does not pass health status" %device)
         # fi
 
         if temperature > criticalThreshold:
-                return (2, "CRITICAL: device temperature (%d) exceeds critical temperature threshold (%s)" % (temperature, criticalThreshold))
+                return (2, "CRITICAL: device (%s) temperature (%d) exceeds critical temperature threshold (%s)|TEMP=%d;%d;%d;" 
+			% (device, temperature, criticalThreshold, temperature, warningThreshold, criticalThreshold))
         elif temperature > warningThreshold:
-                return (1, "WARNING: device temperature (%d) exceeds warning temperature threshold (%s)" % (temperature, warningThreshold))
+                return (1, "WARNING: device (%s) temperature (%d) exceeds warning temperature threshold (%s)|TEMP=%d;%d;%d;" 
+			% (device, temperature, warningThreshold, temperature, warningThreshold, criticalThreshold))
         else:
-                return (0, "OK: device is functional and stable (temperature: %d)" % temperature)
+                return (0, "OK: device (%s) is functional and stable (temperature: %d)|TEMP=%d;%d;%d;" 
+			% (device, temperature, temperature, warningThreshold, criticalThreshold))
         # fi
 # end
 
@@ -286,11 +291,12 @@ if __name__ == "__main__":
         # check device type, ATA is default
         vprint(2, "Get device type")
         devtype = options.devtype
+        vprint(2, "command line supplied device type is: %s" % devtype)
         if not devtype:
                 if device_re.search( device ):
                         devtype = "scsi"
                 else:
-                        devtype = "ata"
+                        devtype4= "ata"
 
         vprint(1, "Device type: %s" % devtype)
 
@@ -300,9 +306,10 @@ if __name__ == "__main__":
         if value != 0:
                 exitWithMessage(value, message)
         vprint(2, "Parse smartctl output")
+        
         (healthStatus, temperature) = parseOutput(healthStatusOutput, temperatureOutput, devtype)
         vprint(2, "Generate return information")
-        (value, message) = createReturnInfo(healthStatus, temperature,
+        (value, message) = createReturnInfo(device, healthStatus, temperature,
                         options.warningThreshold, options.criticalThreshold)
 
         # exit program
