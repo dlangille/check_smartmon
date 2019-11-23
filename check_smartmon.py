@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/local/bin/python2.7
 
 # -*- coding: iso8859-1 -*-
 #
@@ -21,229 +21,291 @@
 #   with this program; if not, write to the Free Software Foundation, Inc.,
 #   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-import os.path
-import sys
+# patches for FreeBSD and SCSI disks: wtps0n@bsdserwis.com
 
+"""Package versioning
+"""
+
+
+import os.path
+import sys, re
+
+from subprocess import Popen,PIPE
 from optparse import OptionParser
 
-# Package versioning
+
 __author__ = "fuller <fuller@daemogorgon.net>"
 __version__ = "$Revision$"
 
 
 # path to smartctl
-_smartctlPath = "/usr/sbin/smartctl"
+_smartctlPath = "/usr/local/sbin/smartctl"
 
 # application wide verbosity (can be adjusted with -v [0-3])
 _verbosity = 0
 
 
 def parseCmdLine(args):
-    """
-    Commandline parsing.
-    """
+        """Commandline parsing."""
 
-    usage = "usage: %prog [options] device"
-    version = "%%prog %s" % __version__
+        usage = "usage: %prog [options] device"
+        version = "%%prog %s" % (__version__)
 
-    parser = OptionParser(usage=usage, version=version)
-    parser.add_option("-d", "--device", action="store", dest="device",
-                      default="", metavar="DEVICE",
-                      help="device to check")
-    parser.add_option("-v", "--verbosity", action="store", dest="verbosity",
-                      type="int", default=0, metavar="LEVEL",
-                      help="set verbosity level to LEVEL;"
-                           " defaults to 0 (quiet),possible values go up to 3")
-    parser.add_option("-w", "--warning-threshold", action="store",
-                      dest="warningThreshold", metavar="TEMP", type="int",
-                      default=55,
-                      help="set temperature warning threshold to "
-                           "given temperature (defaults to 55)")
-    parser.add_option("-c", "--critical-threshold", metavar="TEMP",
-                      action="store", type="int", dest="criticalThreshold",
-                      default="60",
-                      help="set temperature critical threshold to "
-                           "given temperature (defaults to 60)")
+        parser = OptionParser(usage=usage, version=version)
+	parser.add_option("-d", "--device", action="store", dest="device", default="", metavar="DEVICE", help="device to check")
+        parser.add_option("-v", "--verbosity", action="store",
+                        dest="verbosity", type="int", default=0,
+                        metavar="LEVEL", help="set verbosity level to LEVEL; defaults to 0 (quiet), \
+                                        possible values go up to 3")
+        parser.add_option("-t", "--type", action="store", dest="devtype", default="ata", metavar="DEVTYPE",
+                        help="type of device (ata|scsi)")
+        parser.add_option("-w", "--warning-threshold", metavar="TEMP", action="store",
+                        type="int", dest="warningThreshold", default=55,
+                        help="set temperature warning threshold to given temperature (defaults to 55)")
+        parser.add_option("-c", "--critical-threshold", metavar="TEMP", action="store",
+                        type="int", dest="criticalThreshold", default="60",
+                        help="set temperature critical threshold to given temperature (defaults to 60)")
 
-    return parser.parse_args(args)
+        return parser.parse_args(args)
+# end
 
 
 def checkDevice(path):
-    """
-    Check if device exists and permissions are ok.
-    Returns:
-        - 0 ok
-        - 1 no such device
-        - 2 no read permission given
-    """
+        """Check if device exists and permissions are ok.
+        
+        Returns:
+                - 0 ok
+                - 1 no such device
+                - 2 no read permission given
+        """
 
-    vprint(3, "Check if %s does exist and can be read" % path)
-    if not os.access(path, os.F_OK):
-        return 1, "UNKNOWN: no such device found"
-    elif not os.access(path, os.R_OK):
-        return 2, "UNKNOWN: no read permission given"
-    else:
-        return 0, ""
+        vprint(3, "Check if %s does exist and can be read" % path)
+        if not os.access(path, os.F_OK):
+                return (1, "UNKNOWN: no such device found")
+        elif not os.access(path, os.R_OK):
+                return (2, "UNKNOWN: no read permission given")
+        else:
+                return (0, "")
+        # fi
+# end
 
 
 def checkSmartMonTools(path):
-    """
-    Check if smartctl is available and can be executed.
-    Returns:
-        - 0 ok
-        - 1 no such file
-        - 2 cannot execute file
-    """
+        """Check if smartctl is available and can be executed.
 
-    vprint(3, "Check if %s does exist and can be read" % path)
-    if not os.access(path, os.F_OK):
-        return 1, "UNKNOWN: cannot find %s" % path
-    elif not os.access(path, os.X_OK):
-        return 2, "UNKNOWN: cannot execute %s" % path
-    else:
-        return 0, ""
+        Returns:
+                - 0 ok
+                - 1 no such file
+                - 2 cannot execute file
+        """
+
+        vprint(3, "Check if %s does exist and can be read" % path)
+        if not os.access(path, os.F_OK):
+                return (1, "UNKNOWN: cannot find %s" % path)
+        elif not os.access(path, os.X_OK):
+                return (2, "UNKNOWN: cannot execute %s" % path)
+        else:
+                return (0, "")
+        # fi
+# end
 
 
 def callSmartMonTools(path, device):
-    # get health status
-    cmd = "%s -H %s" % (path, device)
-    vprint(3, "Get device health status: %s" % cmd)
-    (child_stdin, child_stdout, child_stderr) = os.popen3(cmd)
-    line = child_stderr.readline()
-    if len(line):
-        return 3, "UNKNOWN: call exits unexpectedly (%s)" % line, "", ""
-    healthStatusOutput = ""
-    for line in child_stdout:
-        healthStatusOutput += line
+        # get health status
+        cmd = "%s -H %s" % (path, device)
+        vprint(3, "Get device health status: %s" % cmd)
+        p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
+        (child_stdout, child_stderr) = (p.stdout, p.stderr)
+        line = child_stderr.readline()
+        if len(line):
+                return (3, "UNKNOWN: call exits unexpectedly (%s)" % line, "",
+                                "")
+        healthStatusOutput = ""
+        for line in child_stdout:
+                healthStatusOutput = healthStatusOutput + line
+        # done
 
-    # get temperature
-    cmd = "%s -A %s" % (path, device)
-    vprint(3, "Get device temperature: %s" % cmd)
-    (child_stdin, child_stdout, child_stderr) = os.popen3(cmd)
-    line = child_stderr.readline()
-    if len(line):
-        return 3, "UNKNOWN: call exits unexpectedly (%s)" % line, "", ""
+        # get temperature
+        cmd = "%s -A %s" % (path, device)
+        vprint(3, "Get device temperature: %s" % cmd)
+        p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
+        (child_stdout, child_stderr) = (p.stdout, p.stderr)
+        line = child_stderr.readline()
+        if len(line):
+                return (3, "UNKNOWN: call exits unexpectedly (%s)" % line, "",
+                                "")
 
-    smartAttributeOutput = ""
-    for line in child_stdout:
-        smartAttributeOutput += line
+        temperatureOutput = ""
+        for line in child_stdout:
+                temperatureOutput = temperatureOutput + line
+        # done
 
-    return 0 ,"", healthStatusOutput, smartAttributeOutput
-
-
-def parseOutput(healthMessage, smartAttributeOutput):
-    """
-    Parse smartctl output
-    Returns (health status, temperature).
-    """
-
-    # parse health status
-    #
-    # look for line '=== START OF READ SMART DATA SECTION ==='
-    statusLine = ""
-    lines = healthMessage.split("\n")
-    getNext = 0
-    for line in lines:
-        if getNext:
-            statusLine = line
-            break
-        elif line == "=== START OF READ SMART DATA SECTION ===":
-            getNext = 1
-    parts = statusLine.split()
-    healthStatus = parts[-1]
-    vprint(3, "Health status: %s" % healthStatus)
-
-    # parse temperature attribute line
-    temperature = 0
-    reallocatedSectors = 0
-    lines = smartAttributeOutput.split("\n")
-    for line in lines:
-        parts = line.split()
-        if len(parts):
-            # 194 is the temperature value id
-            if parts[0] == "194":
-                temperature = int(parts[9])
-            # 5 is reallocated sectors
-            elif parts[0] == "5":
-                reallocatedSectors = int(parts[9])
-    vprint(3, "Temperature: %d" %temperature)
-    vprint(3, "ReallocatedSectors: %d" %reallocatedSectors)
-
-    return (healthStatus, temperature, reallocatedSectors)
+        return (0 ,"", healthStatusOutput, temperatureOutput)
+# end
 
 
-def createReturnInfo(healthStatus, temperature, reallocatedSectors, warningThreshold, criticalThreshold):
-    """
-    Create return information according to given thresholds.
-    """
+def parseOutput(healthMessage, temperatureMessage, devType):
+        """Parse smartctl output
 
-    # this is absolutely critical!
-    if healthStatus != "PASSED":
-        return 2, "CRITICAL: device does not pass health status"
+        Returns (health status, temperature).
+        """
 
-    if (reallocatedSectors > 0):
-        return 2, "CRITICAL: number of bad sectors (%d) exceeds warning threshold (%s)" % (reallocatedSectors, 0)
+        vprint(3, "parseOutput: Device type is %s" % devType)
 
-    if temperature > criticalThreshold:
-        return 2, "CRITICAL: device temperature (%d) exceeds critical temperature threshold (%s)" % (temperature, criticalThreshold)
-    elif temperature > warningThreshold:
-        return 1, "WARNING: device temperature (%d) exceeds warning temperature threshold (%s)" % (temperature, warningThreshold)
-    else:
-        return 0, "OK: device is functional and stable (temperature: %d, reallocatedSectors: %d)" % (temperature, reallocatedSectors)
+        if devType == "ata":
+                # parse health status
+                #
+                # look for line '=== START OF READ SMART DATA SECTION ==='
+                statusLine = ""
+                lines = healthMessage.split("\n")
+                getNext = 0
+                for line in lines:
+                        if getNext:
+                                statusLine = line
+                                break
+                        elif line == "=== START OF READ SMART DATA SECTION ===":
+                                getNext = 1
+                        # fi
+                # done
+        
+                if getNext:
+                        parts = statusLine.split()
+                        healthStatus = parts[-1]
+                # fi
+        
+                # parse temperature attribute line
+                temperature = 0
+                lines = temperatureMessage.split("\n")
+                for line in lines:
+                        parts = line.split()
+                        if len(parts):
+                                # 194 is the temperature value id
+                                if parts[0] == "194":
+                                        temperature = int(parts[9])
+                                        break
+                                # fi
+                        # fi
+                # done
+        # if devType == ata
+
+        if devType == "scsi":
+                stat_re = re.compile( r'SMART Health Status:' )
+                lines = healthMessage.split("\n")
+                for line in lines:
+                        if stat_re.search( line ):
+                               parts = line.split()
+                               healthStatus = parts[-1]
+                               break
+                       # fi
+                # done
+
+                # get temperature from temperatureMessage
+                stat_re = re.compile( r'Current Drive Temperature:' )
+                lines = temperatureMessage.split("\n")
+                for line in lines:
+                        if stat_re.search( line ):
+                               parts = line.split()
+                               temperature = int(parts[-2])
+                               break
+                       # fi
+                # done
+                                
+        # if devType == scsi
+
+	vprint(3, "Health status: %s" % healthStatus)
+        vprint(3, "Temperature: %d" %temperature)
+
+        return (healthStatus, temperature)
+# end
+
+def createReturnInfo(healthStatus, temperature, warningThreshold,
+                criticalThreshold):
+        """Create return information according to given thresholds."""
+
+        # this is absolutely critical!
+        if healthStatus not in [ "PASSED", "OK" ]:
+                return (2, "CRITICAL: device does not pass health status")
+        # fi
+
+        if temperature > criticalThreshold:
+                return (2, "CRITICAL: device temperature (%d) exceeds critical temperature threshold (%s)" % (temperature, criticalThreshold))
+        elif temperature > warningThreshold:
+                return (1, "WARNING: device temperature (%d) exceeds warning temperature threshold (%s)" % (temperature, warningThreshold))
+        else:
+                return (0, "OK: device is functional and stable (temperature: %d)" % temperature)
+        # fi
+# end
 
 
 def exitWithMessage(value, message):
-    """
-    Exit with given value and status message.
-    """
+        """Exit with given value and status message."""
 
-    print message
-    sys.exit(value)
+        print message
+        sys.exit(value)
+# end
 
 
 def vprint(level, message):
-    """
-    Verbosity print.
+        """Verbosity print.
 
-    Decide according to the given verbosity level if the message will be
-    printed to stdout.
-    """
+        Decide according to the given verbosity level if the message will be
+        printed to stdout.
+        """
 
-    if level <= verbosity:
-        print message
+        if level <= verbosity:
+                print message
+        # fi
+# end
 
 
 if __name__ == "__main__":
-    (options, args) = parseCmdLine(sys.argv)
-    verbosity = options.verbosity
+        (options, args) = parseCmdLine(sys.argv)
+        verbosity = options.verbosity
 
-    vprint(2, "Get device name")
-    device = options.device
-    vprint(1, "Device: %s" % device)
+        vprint(2, "Get device name")
+        device = options.device
+        vprint(1, "Device: %s" % device)
 
-    # check if we can access 'path'
-    vprint(2, "Check device")
-    (value, message) = checkDevice(device)
-    if value != 0:
-        exitWithMessage(3, message)
-    # fi
+        # check if we can access 'path'
+        vprint(2, "Check device")
+        (value, message) = checkDevice(device)
+        if value != 0:
+                exitWithMessage(3, message)
+        # fi
 
-    # check if we have smartctl available
-    (value, message) = checkSmartMonTools(_smartctlPath)
-    if value != 0:
-        exitWithMessage(3, message)
-    # fi
-    vprint(1, "Path to smartctl: %s" % _smartctlPath)
+        # check if we have smartctl available
+        (value, message) = checkSmartMonTools(_smartctlPath)
+        if value != 0:
+                exitWithMessage(3, message)
+        # fi
+        vprint(1, "Path to smartctl: %s" % _smartctlPath)
 
-    # call smartctl and parse output
-    vprint(2, "Call smartctl")
-    (value, message, healthStatusOutput, smartAttributeOutput) = callSmartMonTools(_smartctlPath, device)
-    if value != 0:
+        # FreeBSD specific - SCSI disks are /dev/da[0-9]
+        device_re = re.compile( r'/dev/da[0-9]' )
+
+        # check device type, ATA is default
+        vprint(2, "Get device type")
+        devtype = options.devtype
+        if not devtype:
+                if device_re.search( device ):
+                        devtype = "scsi"
+                else:
+                        devtype = "ata"
+
+        vprint(1, "Device type: %s" % devtype)
+
+        # call smartctl and parse output
+        vprint(2, "Call smartctl")
+        (value, message, healthStatusOutput, temperatureOutput) = callSmartMonTools(_smartctlPath, device)
+        if value != 0:
+                exitWithMessage(value, message)
+        vprint(2, "Parse smartctl output")
+        (healthStatus, temperature) = parseOutput(healthStatusOutput, temperatureOutput, devtype)
+        vprint(2, "Generate return information")
+        (value, message) = createReturnInfo(healthStatus, temperature,
+                        options.warningThreshold, options.criticalThreshold)
+
+        # exit program
         exitWithMessage(value, message)
-    vprint(2, "Parse smartctl output")
-    (healthStatus, temperature, reallocatedSectors) = parseOutput(healthStatusOutput, smartAttributeOutput)
-    vprint(2, "Generate return information")
-    (value, message) = createReturnInfo(healthStatus, temperature, reallocatedSectors, options.warningThreshold, options.criticalThreshold)
 
-    # exit program
-    exitWithMessage(value, message)
+# fi
