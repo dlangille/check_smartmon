@@ -308,7 +308,7 @@ if __name__ == "__main__":
                 if device_re.search( device ):
                         devtype = "scsi"
                 else:
-                        devtype4= "ata"
+                        devtype = "ata"
 
         vprint(1, "Device type: %s" % devtype)
 
