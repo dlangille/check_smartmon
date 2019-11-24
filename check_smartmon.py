@@ -52,8 +52,8 @@ def parseCmdLine(args):
         version = "%%prog %s" % (__version__)
 
         parser = OptionParser(usage=usage, version=version)
-	parser.add_option("-d", "--device", action="store", dest="device", default="", metavar="DEVICE",
-			help="device to check")
+        parser.add_option("-d", "--device", action="store", dest="device", default="", metavar="DEVICE",
+                        help="device to check")
         parser.add_option("-v", "--verbosity", action="store",
                         dest="verbosity", type="int", default=0,
                         metavar="LEVEL", help="set verbosity level to LEVEL; defaults to 0 (quiet), \
@@ -123,7 +123,7 @@ def callSmartMonTools(path, device):
                                 "")
         healthStatusOutput = ""
         for line in child_stdout:
-                healthStatusOutput = healthStatusOutput + line
+                healthStatusOutput = healthStatusOutput + line.decode('utf-8')
         # done
 
         # get temperature
@@ -138,7 +138,7 @@ def callSmartMonTools(path, device):
 
         temperatureOutput = ""
         for line in child_stdout:
-                temperatureOutput = temperatureOutput + line
+                temperatureOutput = temperatureOutput + line.decode('utf-8')
         # done
 
         return (0 ,"", healthStatusOutput, temperatureOutput)
@@ -153,6 +153,7 @@ def parseOutput(healthMessage, temperatureMessage, devType):
 
         vprint(3, "parseOutput: Device type is %s" % devType)
 
+        healthStatus = ""
         if devType == "ata":
                 # parse health status
                 #
@@ -162,7 +163,8 @@ def parseOutput(healthMessage, temperatureMessage, devType):
                 getNext = 0
                 for line in lines:
                         if getNext:
-                                if line <> "SMART STATUS RETURN: incomplete response, ATA output registers missing":
+                                if line != "SMART STATUS RETURN: incomplete response, ATA output registers missing" and \
+                                   line != "SMART Status not supported: Incomplete response, ATA output registers missing" :
                                         statusLine = line
                                         break
                         elif line == "=== START OF READ SMART DATA SECTION ===":
@@ -170,6 +172,7 @@ def parseOutput(healthMessage, temperatureMessage, devType):
                         # fi
                 # done
         
+                vprint(3, "parseOutput: statusLine is: '%s'" % statusLine )
                 if getNext:
                         parts = statusLine.split()
                         healthStatus = parts[-1]
@@ -182,7 +185,7 @@ def parseOutput(healthMessage, temperatureMessage, devType):
                         parts = line.split()
                         if len(parts):
                                 # 194 is the temperature value id
-                                if parts[0] == "194":
+                                if parts[0] == "194" or parts[0] == "190":
                                         temperature = int(parts[9])
                                         break
                                 # fi
@@ -191,9 +194,11 @@ def parseOutput(healthMessage, temperatureMessage, devType):
         # if devType == ata
 
         if devType == "scsi":
-                stat_re = re.compile( r'SMART Health Status:' )
+                vprint(3, "parseOutput: searching for 'SMART Health Status' section")
+                stat_re = re.compile( r'SMART Health Status:|SMART overall-health self-assessment test result:' )
                 lines = healthMessage.split("\n")
                 for line in lines:
+                        vprint(3, "parseOutput: line is: '%s'" % line)
                         if stat_re.search( line ):
                                parts = line.split()
                                healthStatus = parts[-1]
@@ -202,19 +207,25 @@ def parseOutput(healthMessage, temperatureMessage, devType):
                 # done
 
                 # get temperature from temperatureMessage
-                stat_re = re.compile( r'Current Drive Temperature:' )
+                temperature = 0
+                vprint(3, "parseOutput: searching for temperature line section")
+                stat_re = re.compile( r'Current Drive Temperature:|Temperature_Celsius' )
                 lines = temperatureMessage.split("\n")
                 for line in lines:
+                        vprint(3, "parseOutput: line is: '%s'" % line)
                         if stat_re.search( line ):
                                parts = line.split()
+                               vprint(3, "parseOutput: we are very keen on this line: '%s'" % line)
                                temperature = int(parts[-2])
+                               vprint(3, "parseOutput: Is this the temperature? '%s'" % temperature)
                                break
                        # fi
+
                 # done
                                 
         # if devType == scsi
 
-	vprint(3, "Health status: %s" % healthStatus)
+        vprint(3, "Health status: %s" % healthStatus)
         vprint(3, "Temperature: %d" %temperature)
 
         return (healthStatus, temperature)
@@ -226,6 +237,7 @@ def createReturnInfo(device, healthStatus, temperature, warningThreshold,
 
         # this is absolutely critical!
         if healthStatus not in [ "PASSED", "OK" ]:
+                vprint(2, "Health status: %s" % healthStatus)
                 return (2, "CRITICAL: device (%s) does not pass health status" %device)
         # fi
 
@@ -245,7 +257,7 @@ def createReturnInfo(device, healthStatus, temperature, warningThreshold,
 def exitWithMessage(value, message):
         """Exit with given value and status message."""
 
-        print message
+        print( message )
         sys.exit(value)
 # end
 
@@ -258,7 +270,7 @@ def vprint(level, message):
         """
 
         if level <= verbosity:
-                print message
+                print( message )
         # fi
 # end
 
@@ -306,7 +318,6 @@ if __name__ == "__main__":
         if value != 0:
                 exitWithMessage(value, message)
         vprint(2, "Parse smartctl output")
-        
         (healthStatus, temperature) = parseOutput(healthStatusOutput, temperatureOutput, devtype)
         vprint(2, "Generate return information")
         (value, message) = createReturnInfo(device, healthStatus, temperature,
